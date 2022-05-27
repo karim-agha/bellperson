@@ -14,7 +14,7 @@ readme = "README.md"
 edition = "2018"
 
 [dependencies]
-bitvec = "0.22"
+bitvec = "1.0"
 blake2s_simd = "0.5"
 ff = "0.11.0"
 group = "0.11.0"

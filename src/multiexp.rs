@@ -87,9 +87,9 @@ impl<G: PrimeCurveAffine> Source<G> for (Arc<Vec<G>>, usize) {
     }
 }
 
-pub trait QueryDensity: Sized {
+pub trait QueryDensity<'a>: Sized {
     /// Returns whether the base exists.
-    type Iter: Iterator<Item = bool>;
+    type Iter: Iterator<Item = BitRef::<'a>>;
 
     fn iter(self) -> Self::Iter;
     fn get_query_size(self) -> Option<usize>;
@@ -108,11 +108,18 @@ impl AsRef<FullDensity> for FullDensity {
     }
 }
 
-impl<'a> QueryDensity for &'a FullDensity {
-    type Iter = iter::Repeat<bool>;
+impl<'a> QueryDensity<'a> for &'a FullDensity {
+    type Iter = iter::Repeat<BitRef<'a>>;
 
+    // NOTE: this is a temporary and a very ugly hack
+    // for solving this compilation issue: 
+    // https://github.com/bitvecto-rs/bitvec/issues/105
+    // the solution is to update upstream dependencies versions
+    // in the cargo tree included by fvm.
     fn iter(self) -> Self::Iter {
-        iter::repeat(true)
+        use bitvec::prelude::*;
+        static ONE: BitArray = bitarr![1;1];
+        iter::repeat(ONE.first().unwrap()) // always ref to a true bit
     }
 
     fn get_query_size(self) -> Option<usize> {
@@ -133,11 +140,11 @@ pub struct DensityTracker {
     pub total_density: usize,
 }
 
-impl<'a> QueryDensity for &'a DensityTracker {
-    type Iter = bitvec::slice::BitValIter<'a, Lsb0, usize>;
+impl<'a> QueryDensity<'a>for &'a DensityTracker {
+    type Iter = bitvec::slice::Iter<'a, usize, Lsb0>;
 
     fn iter(self) -> Self::Iter {
-        self.bv.iter().by_val()
+        self.bv.iter()
     }
 
     fn get_query_size(self) -> Option<usize> {
@@ -260,7 +267,7 @@ fn multiexp_inner<Q, D, G, S>(
     c: u32,
 ) -> Result<<G as PrimeCurveAffine>::Curve, SynthesisError>
 where
-    for<'a> &'a Q: QueryDensity,
+    for<'a> &'a Q: QueryDensity<'a>,
     D: Send + Sync + 'static + Clone + AsRef<Q>,
     G: PrimeCurveAffine,
     S: SourceBuilder<G>,
@@ -288,7 +295,7 @@ where
 
         // Sort the bases into buckets
         for (&exp, density) in exponents.iter().zip(density_map.as_ref().iter()) {
-            if density {
+            if *density.as_ref() {
                 if exp.as_ref() == zero.as_ref() {
                     bases.skip(1)?;
                 } else if exp.as_ref() == one.as_ref() {
@@ -353,7 +360,7 @@ pub fn multiexp<Q, D, G, E, S>(
     kern: &mut Option<gpu::LockedMultiexpKernel<E>>,
 ) -> Waiter<Result<<G as PrimeCurveAffine>::Curve, SynthesisError>>
 where
-    for<'a> &'a Q: QueryDensity,
+    for<'a> &'a Q: QueryDensity<'a>,
     D: Send + Sync + 'static + Clone + AsRef<Q>,
     G: PrimeCurveAffine,
     E: gpu::GpuEngine,
